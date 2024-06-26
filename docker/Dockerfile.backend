@@ -1,0 +1,21 @@
+FROM python:3.10
+
+WORKDIR /code
+
+RUN apt-get -y update \
+    && apt-get install -y python3-dev libpq-dev postgresql postgresql-contrib netcat \
+    && apt-get -y clean
+
+RUN pip install --upgrade poetry
+ADD ./pyproject.toml /code/pyproject.toml
+ADD ./poetry.lock /code/poetry.lock
+
+
+RUN python3 -m venv /venv
+
+# switch to venv for the remaining commands
+ENV VIRTUAL_ENV="/venv"
+ENV PATH="/venv/bin:$PATH"
+
+
+RUN poetry install --no-root -v --with dev

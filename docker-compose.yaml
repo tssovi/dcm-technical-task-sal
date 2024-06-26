@@ -1,0 +1,67 @@
+version: '3.7'
+
+services:
+  db:
+    image: postgres:14
+    env_file: ./ionos/.env
+    volumes:
+      - ./provision/db-initialize.sql:/docker-entrypoint-initdb.d/1.sql
+      - ./provision/postgres-data:/var/lib/postgresql/data
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`ionos.local`) && PathPrefix(`/api/`)"
+      - "traefik.http.services.backend.loadbalancer.server.port=80"
+    command: >
+      /bin/bash -c "
+        ./wait-for-dependencies.sh db 5432;
+        python manage.py migrate;
+        python manage.py runserver 0.0.0.0:80;
+      "
+    env_file: ./ionos/.env
+    volumes:
+      - .:/code
+    depends_on:
+      - db
+      - redis
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend
+    env_file: ./ionos/.env
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`ionos.local`) && PathPrefix(`/`)"
+  traefik:
+    image: "traefik:v2.9"
+    container_name: "traefik"
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+    ports:
+      - "80:80"
+      - "8080:8080"
+  redis:
+    image: "redis:alpine"
+  celery_worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    command: >
+      /bin/bash -c "
+        ./wait-for-dependencies.sh db 5432;
+        celery -A ionos worker --loglevel=info
+      "
+    env_file: ./ionos/.env
+    volumes:
+      - .:/code
+    depends_on:
+      - db
+      - redis
