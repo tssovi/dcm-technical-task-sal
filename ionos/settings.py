@@ -151,3 +151,7 @@ TEST_RUN_REQUEST_TIMEOUT_SECONDS = 60 * 60 * 30  # 30 Minutes
 TEST_BASE_CMD = ['pytest', '-v']
 
 DEFAULT_AUTO_FIELD = 'django.db.models.AutoField'
+
+# Use the eager mode of Celery in tests to execute tasks immediately when called
+CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_EAGER_PROPAGATES = True
