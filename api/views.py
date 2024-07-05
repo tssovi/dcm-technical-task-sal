@@ -1,5 +1,6 @@
 from rest_framework import status
 from rest_framework.generics import ListCreateAPIView, RetrieveAPIView
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -10,8 +11,9 @@ from api.usecases import get_assets
 
 
 class TestRunRequestAPIView(ListCreateAPIView):
-    serializer_class = TestRunRequestSerializer
     queryset = TestRunRequest.objects.all().order_by('-created_at')
+    serializer_class = TestRunRequestSerializer
+    parser_classes = (MultiPartParser, FormParser)
 
     def perform_create(self, serializer):
         instance = serializer.save()
