@@ -113,3 +113,49 @@ class TestTestRunRequest(TestCase):
     def test_save_logs_not_empty(self):
         self.test_run_req.save_logs('logs')
         self.assertEqual('\nlogs', self.test_run_req.logs)
+
+
+class TestEnvironmentModelTests(TestCase):
+    def setUp(self):
+        self.environment = TestEnvironment.objects.create(name="TestEnv1")
+
+    def test_environment_lock_unlock(self):
+        # Test initial state is idle
+        self.assertTrue(self.environment.is_idle())
+
+        # Lock the environment and test state
+        self.environment.lock()
+        self.assertTrue(self.environment.is_busy())
+
+        # Unlock the environment and test state
+        self.environment.unlock()
+        self.assertTrue(self.environment.is_idle())
+
+    def test_lock_already_locked_env(self):
+        self.environment.lock()
+        with self.assertRaises(RuntimeError):
+            self.environment.lock()
+
+    def test_unlock_already_unlocked_env(self):
+        with self.assertRaises(RuntimeError):
+            self.environment.unlock()
+
+
+class TestRunRequestModelTests(TestCase):
+    def setUp(self):
+        self.environment = TestEnvironment.objects.create(name="TestEnv2")
+        self.test_file_path = TestFilePath.objects.create(path="dummy/path.py")
+        self.test_run_request = TestRunRequest.objects.create(requested_by="tester", env=self.environment)
+        self.test_run_request.path.add(self.test_file_path)
+
+    def test_mark_as_running(self):
+        self.test_run_request.mark_as_running()
+        self.assertEqual(self.test_run_request.status, TestRunRequest.StatusChoices.RUNNING.name)
+
+    def test_mark_as_success(self):
+        self.test_run_request.mark_as_success()
+        self.assertEqual(self.test_run_request.status, TestRunRequest.StatusChoices.SUCCESS.name)
+
+    def test_mark_as_failed(self):
+        self.test_run_request.mark_as_failed()
+        self.assertEqual(self.test_run_request.status, TestRunRequest.StatusChoices.FAILED.name)

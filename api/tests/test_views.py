@@ -3,8 +3,10 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework import status
+from rest_framework.test import APITestCase
 
 from api.models import TestRunRequest, TestEnvironment, TestFilePath
+from api.tasks import execute_test_run_request
 
 
 class TestTestRunRequestAPIView(TestCase):
@@ -13,6 +15,7 @@ class TestTestRunRequestAPIView(TestCase):
         self.env = TestEnvironment.objects.create(name='my_env')
         self.path1 = TestFilePath.objects.create(path='path1')
         self.path2 = TestFilePath.objects.create(path='path2')
+        self.test_file_path = TestFilePath.objects.create(path='test_path.py')
         self.url = reverse('test_run_req')
 
     def test_get_empty(self):
@@ -64,22 +67,53 @@ class TestTestRunRequestAPIView(TestCase):
     def test_post_valid_multiple_paths(self, task):
         response = self.client.post(
             self.url,
-            data={'env': self.env.id, 'path': [self.path1.id, self.path2.id], 'requested_by': 'iron man'}
+            data={'env': self.env.id, 'path': [self.path1.id, self.path2.id], 'requested_by': 'iron man'},
+            format='multipart'
         )
+
         self.assertEqual(status.HTTP_201_CREATED, response.status_code)
-        response_data = response.json()
+        response_data = response.json()  # Use response.json() to get the parsed data
+
         self.__assert_valid_response(response_data, [self.path1.id, self.path2.id])
         self.assertTrue(task.called)
         task.assert_called_with(response_data['id'])
 
     @patch('api.views.execute_test_run_request.delay')
     def test_post_valid_one_path(self, task):
-        response = self.client.post(self.url, data={'env': self.env.id, 'path': self.path1.id, 'requested_by': 'iron man'})
+        response = self.client.post(
+            self.url,
+            data={'env': self.env.id, 'path': self.path1.id, 'requested_by': 'iron man'},
+            format='multipart'
+        )
+
         self.assertEqual(status.HTTP_201_CREATED, response.status_code)
         response_data = response.json()
+
         self.__assert_valid_response(response_data, [self.path1.id])
         self.assertTrue(task.called)
         task.assert_called_with(response_data['id'])
+
+    @patch('subprocess.Popen')
+    def test_execute_test_run_request_success(self, mock_popen):
+        test_run_request = TestRunRequest.objects.create(
+            requested_by='testuser',
+            env=self.env,
+        )
+
+        test_run_request.path.set([self.test_file_path])
+
+        mock_process = mock_popen.return_value
+        mock_process.wait.return_value = 0
+        mock_process.stdout.read.return_value = 'Test successful'
+        mock_process.stderr.read.return_value = ''
+        self.env.status = 'IDLE'
+        self.env.save()
+
+        execute_test_run_request(test_run_request.id)
+
+        self.env.refresh_from_db()
+        self.assertEqual(self.env.status, 'IDLE')
+        mock_popen.assert_called_once()
 
     def __assert_valid_response(self, response_data, expected_paths):
         self.assertIn('created_at', response_data)
@@ -112,10 +146,10 @@ class TestRunRequestItemAPIView(TestCase):
         self.path2 = TestFilePath.objects.create(path='path2')
         self.test_run_req.path.add(self.path1)
         self.test_run_req.path.add(self.path2)
-        self.url = reverse('test_run_req_item', args=(self.test_run_req.id, ))
+        self.url = reverse('test_run_req_item', args=(self.test_run_req.id,))
 
     def test_get_invalid_pk(self):
-        self.url = reverse('test_run_req_item', args=(8897, ))
+        self.url = reverse('test_run_req_item', args=(8897,))
         response = self.client.get(self.url)
         self.assertEqual(status.HTTP_404_NOT_FOUND, response.status_code)
 
