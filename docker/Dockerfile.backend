@@ -3,7 +3,7 @@ FROM python:3.10
 WORKDIR /code
 
 RUN apt-get -y update \
-    && apt-get install -y python3-dev libpq-dev postgresql postgresql-contrib netcat \
+    && apt-get install -y python3-dev libpq-dev postgresql postgresql-contrib netcat-traditional \
     && apt-get -y clean
 
 RUN pip install --upgrade poetry
