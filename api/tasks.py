@@ -3,6 +3,7 @@ import subprocess
 
 from celery import shared_task
 from django.conf import settings
+from django.db import transaction
 
 from api.models import TestRunRequest, TestEnvironment
 
@@ -27,28 +28,31 @@ def handle_task_retry(instance: TestRunRequest, retry: int) -> None:
 
 
 @shared_task
-def execute_test_run_request(instance_id: int, retry: int = 0) -> None:
-    instance = TestRunRequest.objects.get(id=instance_id)
+def execute_test_run_request(instance_id: int, retry: int = 0):
+    try:
+        with transaction.atomic():
+            instance = TestRunRequest.objects.select_for_update().get(id=instance_id)
+            env = TestEnvironment.objects.select_for_update().get(name=instance.env.name)
 
-    if instance.env.is_busy():
-        handle_task_retry(instance, retry)
-        return
+            if env.is_busy():
+                handle_task_retry(instance, retry)
+                return
 
-    env = TestEnvironment.objects.get(name=instance.env.name)
-    env.lock()
+            env.lock()
+            cmd = instance.get_command()
+            logger.info(f'Running tests(ID:{instance_id}), CMD({" ".join(cmd)}) on env {env.name}')
+            instance.mark_as_running()
 
-    cmd = instance.get_command()
-    logger.info(f'Running tests(ID:{instance_id}), CMD({" ".join(cmd)}) on env {instance.env.name}')
+            run = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   text=True)
+            return_code = run.wait(timeout=settings.TEST_RUN_REQUEST_TIMEOUT_SECONDS)
 
-    instance.mark_as_running()
+            env.unlock()
+            instance.save_logs(logs=run.stdout.read())
+            if return_code == 0:
+                instance.mark_as_success()
+            else:
+                instance.mark_as_failed()
 
-    run = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    return_code = run.wait(timeout=settings.TEST_RUN_REQUEST_TIMEOUT_SECONDS)
-
-    env.unlock()
-    instance.save_logs(logs=run.stdout.read())
-    if return_code == 0:
-        instance.mark_as_success()
-    else:
-        instance.mark_as_failed()
-    logger.info(f'tests(ID:{instance_id}), CMD({" ".join(cmd)}) on env {instance.env.name} Completed successfully.')
+    except TestRunRequest.DoesNotExist:
+        logger.error(f"TestRunRequest with id {instance_id} does not exist.")
